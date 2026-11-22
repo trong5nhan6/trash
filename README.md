@@ -41,6 +41,17 @@ Manual alternative (data uploaded as a Kaggle Dataset):
 !cd trash && python code/probe.py --out /kaggle/working/outputs --seed 0
 ```
 
+## Gap-reduction methods (`notebooks/kaggle_methods_2xT4.ipynb`)
+
+| Method | Idea | Scripts |
+|---|---|---|
+| M1 CLAD-Aug | object cut-outs (rembg) recomposed on procedural backgrounds, + clutter from non-core classes, + degradation (crumple, dirt, lighting); probe trained on originals + composites | `segment.py`, `composite.py`, `extract.py --list` |
+| M2 Text anchors | CLIP/SigLIP zero-shot head with recycling-definition prompts, log-linear ensemble with the linear probe | `extract_clip.py`, `prompts.py` |
+| M3 Test-time adaptation | label-free: target feature re-standardisation, T3A prototypes, T3A+probe ensemble | (features only) |
+
+All evaluated by `run_methods.py --method {clad,text,tta}` with the B0 protocol; near-duplicates
+(DINOv2 cosine >= 0.95) are removed first by `neardup.py`.
+
 ## Protocol notes
 - **Dedup:** exact duplicates across datasets are kept only in the earliest-published dataset
   (TrashNet 2016 > Garbage12 2021 > TrashBox 2022 > RealWaste 2023). Within a dataset, duplicates with

@@ -35,6 +35,13 @@ def ece_score(prob, y, n_bins=15):
     return float(e)
 
 
+def load_kept(z, man):
+    """Features of rows still kept in the manifest (near-dup filtering may drop rows after extraction)."""
+    row_id = z["row_id"]
+    keep = man.loc[row_id, "keep"].to_numpy() == 1
+    return z["feats"][keep].astype(np.float32), row_id[keep]
+
+
 def fit_probe(Xtr, ytr, Xva, yva, seed):
     """Standardize + multinomial logistic regression; pick C by macro-F1 on source val."""
     sc = StandardScaler().fit(Xtr)
@@ -81,8 +88,7 @@ def main():
 def run_backbone(name, out, man, seed):
     rows, preds = [], []
     z = np.load(out / "feats" / f"{name}.npz")
-    X = z["feats"].astype(np.float32)
-    row_id = z["row_id"]
+    X, row_id = load_kept(z, man)
     m = man.loc[row_id]
     ds = m.dataset.to_numpy()
     y = m.label.map(CORE_TO_ID).to_numpy()

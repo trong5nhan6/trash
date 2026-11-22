@@ -56,17 +56,28 @@ def main():
     ap.add_argument("--backbones", nargs="+", default=list(BACKBONES))
     ap.add_argument("--batch", type=int, default=128)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--list", default=None,
+                    help="CSV with columns path,row_id,k (e.g. CLAD composites); paths relative to --root")
+    ap.add_argument("--tag", default=None, help="with --list: features go to outputs/feats_<tag>/")
     args = ap.parse_args()
 
-    out = Path(args.out); (out / "feats").mkdir(parents=True, exist_ok=True)
-    man = pd.read_csv(out / "manifest.csv")
-    sel = man[(man.keep == 1) & (man.core == 1)]
-    row_id, paths = sel.index.to_numpy(), sel.path.tolist()
+    out = Path(args.out)
+    extra = {}
+    if args.list:
+        lst = pd.read_csv(args.list)
+        row_id, paths, extra = lst.row_id.to_numpy(), lst.path.tolist(), {"k": lst.k.to_numpy()}
+        feat_dir = out / f"feats_{args.tag}"
+    else:
+        man = pd.read_csv(out / "manifest.csv")
+        sel = man[(man.keep == 1) & (man.core == 1)]
+        row_id, paths = sel.index.to_numpy(), sel.path.tolist()
+        feat_dir = out / "feats"
+    feat_dir.mkdir(parents=True, exist_ok=True)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"{len(paths)} images, device={dev}")
 
     for name in args.backbones:
-        f_out = out / "feats" / f"{name}.npz"
+        f_out = feat_dir / f"{name}.npz"
         if f_out.exists():
             print(f"[skip] {name} (exists)"); continue
         t0 = time.time()
@@ -79,7 +90,7 @@ def main():
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(dev == "cuda")):
                 feats.append(model(x.to(dev, non_blocking=True)).float().cpu())
         feats = torch.cat(feats).numpy().astype(np.float16)
-        np.savez(f_out, feats=feats, row_id=row_id)
+        np.savez(f_out, feats=feats, row_id=row_id, **extra)
         print(f"[done] {name}: {feats.shape} in {time.time() - t0:.0f}s")
         del model; torch.cuda.empty_cache()
 
