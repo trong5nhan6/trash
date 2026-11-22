@@ -1,0 +1,6 @@
+datasets/
+outputs/feats/
+*.npz
+*.npy
+__pycache__/
+.ipynb_checkpoints/
