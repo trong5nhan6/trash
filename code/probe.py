@@ -61,6 +61,7 @@ def main():
     ap.add_argument("--out", default="outputs")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--backbones", nargs="*", default=None, help="default: all files in feats/")
+    ap.add_argument("--jobs", type=int, default=4, help="backbones probed in parallel (CPU processes)")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -68,33 +69,44 @@ def main():
     man = pd.read_csv(out / "manifest.csv")
     names = args.backbones or sorted(p.stem for p in (out / "feats").glob("*.npz"))
 
+    # One worker per backbone (CPU); each returns its result rows.
+    from joblib import Parallel, delayed
+    per_bb = Parallel(n_jobs=min(args.jobs, len(names)), verbose=0)(
+        delayed(run_backbone)(name, out, man, args.seed) for name in names)
+    rows = [r for rs in per_bb for r in rs]
+    finish(rows, names, res_dir, args.seed)
+
+
+def run_backbone(name, out, man, seed):
     rows = []
-    for name in names:
-        z = np.load(out / "feats" / f"{name}.npz")
-        X = z["feats"].astype(np.float32)
-        m = man.loc[z["row_id"]]
-        ds = m.dataset.to_numpy()
-        y = m.label.map(CORE_TO_ID).to_numpy()
-        split = make_split(ds, y, seed=args.seed)
+    z = np.load(out / "feats" / f"{name}.npz")
+    X = z["feats"].astype(np.float32)
+    m = man.loc[z["row_id"]]
+    ds = m.dataset.to_numpy()
+    y = m.label.map(CORE_TO_ID).to_numpy()
+    split = make_split(ds, y, seed=seed)
 
-        protocols = [("single", [d]) for d in DATASET_NAMES] + \
-                    [("lodo", [s for s in DATASET_NAMES if s != d]) for d in DATASET_NAMES]
-        for proto, srcs in protocols:
-            t0 = time.time()
-            src = np.isin(ds, srcs)
-            tr, va = src & (split == "train"), src & (split == "val")
-            sc, clf, C, val_f1 = fit_probe(X[tr], y[tr], X[va], y[va], args.seed)
-            targets = DATASET_NAMES if proto == "single" else [d for d in DATASET_NAMES if d not in srcs]
-            for tgt in targets:
-                te = (ds == tgt) & (split == "test")
-                r = {"backbone": name, "seed": args.seed, "protocol": proto,
-                     "train_on": "+".join(srcs), "test_on": tgt,
-                     "in_domain": int(tgt in srcs), "C": C, "val_f1": val_f1 * 100}
-                r.update(evaluate(sc, clf, X[te], y[te]))
-                rows.append(r)
-            print(f"[{name}] {proto:6s} train={'+'.join(srcs):35s} C={C:<6} "
-                  f"val_f1={val_f1*100:.1f}  ({time.time()-t0:.0f}s)")
+    protocols = [("single", [d]) for d in DATASET_NAMES] + \
+                [("lodo", [s for s in DATASET_NAMES if s != d]) for d in DATASET_NAMES]
+    for proto, srcs in protocols:
+        t0 = time.time()
+        src = np.isin(ds, srcs)
+        tr, va = src & (split == "train"), src & (split == "val")
+        sc, clf, C, val_f1 = fit_probe(X[tr], y[tr], X[va], y[va], seed)
+        targets = DATASET_NAMES if proto == "single" else [d for d in DATASET_NAMES if d not in srcs]
+        for tgt in targets:
+            te = (ds == tgt) & (split == "test")
+            r = {"backbone": name, "seed": seed, "protocol": proto,
+                 "train_on": "+".join(srcs), "test_on": tgt,
+                 "in_domain": int(tgt in srcs), "C": C, "val_f1": val_f1 * 100}
+            r.update(evaluate(sc, clf, X[te], y[te]))
+            rows.append(r)
+        print(f"[{name}] {proto:6s} train={'+'.join(srcs):35s} C={C:<6} "
+              f"val_f1={val_f1*100:.1f}  ({time.time()-t0:.0f}s)", flush=True)
+    return rows
 
+
+def finish(rows, names, res_dir, seed):
     df = pd.DataFrame(rows)
     df.to_csv(res_dir / "probe_results.csv", index=False)
 
@@ -117,7 +129,7 @@ def main():
                      "ood_ECE": s[s.in_domain == 0].ece.mean()})
     summ = pd.DataFrame(summ).round(2)
     summ.to_csv(res_dir / "table2a_summary.csv", index=False)
-    print(f"\n=== Table 2a (macro-F1 in %, seed {args.seed}) ===")
+    print(f"\n=== Table 2a (macro-F1 in %, seed {seed}) ===")
     print(summ.to_string(index=False))
     for name in names:
         print(f"\n--- {name}: macro-F1 matrix (rows=train, cols=test) ---")

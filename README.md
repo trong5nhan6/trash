@@ -29,8 +29,11 @@ python code/extract.py --root $DATA_ROOT --out outputs            # resumable, s
 python code/probe.py   --out outputs --seed 0
 ```
 
-### Kaggle
-Upload the data folder as a Kaggle Dataset, enable GPU (T4), then in a notebook:
+### Kaggle (recommended)
+Use `notebooks/kaggle_baseline_2xT4.ipynb`: downloads the data zip from Google Drive, runs feature
+extraction on both T4 GPUs in parallel and the probes on all CPU cores.
+
+Manual alternative (data uploaded as a Kaggle Dataset):
 ```bash
 !git clone https://github.com/trong5nhan6/trash.git && cd trash && pip -q install -r requirements.txt
 !cd trash && python code/prepare.py --root /kaggle/input/<your-dataset-slug> --out /kaggle/working/outputs
