@@ -116,7 +116,10 @@ run_on_gpus(chains, "B_emb_seg")
 code("""
 # C. tạo ảnh ghép CLAD (CPU) + xem thử
 if RUN["clad"]:
-    !cd {REPO_DIR}/code && python composite.py --out {OUT} --img-out {CLAD_DIR} --variants c1 full --k {CLAD_K}
+    subprocess.run(["python", "composite.py", "--out", OUT, "--img-out", CLAD_DIR,
+                    "--variants", "c1", "full", "--k", str(CLAD_K)], cwd=f"{REPO_DIR}/code", check=True)
+    for v in ["c1", "full"]:
+        assert os.path.exists(f"{CLAD_DIR}/list_{v}.csv"), f"composite step produced no list_{v}.csv"
     from PIL import Image
     for v in ["c1", "full"]:
         fs = sorted(glob.glob(f"{CLAD_DIR}/{v}/*.jpg"))[::max(1, len(glob.glob(f'{CLAD_DIR}/{v}/*.jpg'))//12)][:12]

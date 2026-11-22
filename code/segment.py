@@ -49,9 +49,13 @@ def main():
         for n, (rid, r) in enumerate(todo.iterrows()):
             if rid in done: continue
             try:
-                im = Image.open(Path(args.root) / r.path).convert("RGB")
+                with Image.open(Path(args.root) / r.path) as src:
+                    im = src.convert("RGB")
                 im.thumbnail((512, 512))
-                mask = remove(im, session=sess, only_mask=True)
+                im = Image.fromarray(np.asarray(im))          # drop metadata (huge ICC profiles break PNG reading)
+                mask = remove(im, session=sess, only_mask=True).convert("L")
+                if mask.size != im.size:                       # rare: rembg returns a different size
+                    mask = mask.resize(im.size, Image.BILINEAR)
                 a = np.asarray(mask, dtype=np.uint8)
                 frac = float((a > 127).mean())
                 ok = MIN_FRAC <= frac <= MAX_FRAC

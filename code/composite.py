@@ -16,8 +16,12 @@ import argparse, glob, os
 from multiprocessing import Pool
 from pathlib import Path
 import numpy as np, pandas as pd
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, PngImagePlugin
 from scipy.ndimage import gaussian_filter, map_coordinates
+
+# Some source photos carry huge embedded ICC profiles that segment.py copied into the cut-out PNGs;
+# Pillow refuses to read them by default ("Decompressed data too large for MAX_TEXT_CHUNK").
+PngImagePlugin.MAX_TEXT_CHUNK = 256 * 1024 * 1024
 
 S = 256
 G = {}  # per-worker globals
@@ -28,7 +32,8 @@ def _init(fg_dir, pools):
 
 
 def load_fg(rid):
-    return Image.open(os.path.join(G["fg_dir"], f"{rid}.png")).convert("RGBA")
+    with Image.open(os.path.join(G["fg_dir"], f"{rid}.png")) as im:
+        return im.convert("RGBA")
 
 
 # ---------------- procedural backgrounds ----------------
@@ -124,6 +129,15 @@ def place(canvas, rgba, rng, size_frac, center_range=(.3, .7), center=None):
 
 
 def make(task):
+    """Returns None (and skips) if any cut-out cannot be read, so one bad file never stops the run."""
+    try:
+        return _make(task)
+    except Exception as e:
+        print(f"[skip] row {task[0]} k{task[2]}: {type(e).__name__}: {e}", flush=True)
+        return None
+
+
+def _make(task):
     rid, ds, k, variant, out_path = task
     rng = np.random.default_rng([int(rid), int(k), 0 if variant == "c1" else 1])
     canvas = procedural_bg(rng)
@@ -173,10 +187,11 @@ def main():
         with Pool(args.workers, initializer=_init, initargs=(str(out / "seg" / "fg"), pools)) as p:
             for i, _ in enumerate(p.imap_unordered(make, todo, chunksize=64)):
                 if i % 10000 == 0: print(f"  {v}: {i}/{len(todo)}", flush=True)
-        pd.DataFrame({"path": [os.path.relpath(t[4], args.img_out) for t in tasks],
-                      "row_id": [t[0] for t in tasks], "k": [t[2] for t in tasks]}
+        made = [t for t in tasks if os.path.exists(t[4])]          # list only composites that exist
+        pd.DataFrame({"path": [os.path.relpath(t[4], args.img_out) for t in made],
+                      "row_id": [t[0] for t in made], "k": [t[2] for t in made]}
                      ).to_csv(Path(args.img_out) / f"list_{v}.csv", index=False)
-        print(f"{v}: {len(tasks)} composites -> {vdir}")
+        print(f"{v}: {len(made)}/{len(tasks)} composites -> {vdir}", flush=True)
 
 
 if __name__ == "__main__":
