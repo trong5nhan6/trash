@@ -17,6 +17,10 @@ Every run re-fits the B0 probe (variant 'b0') so each method is compared to B0 o
     ens_definition_a{25,75} : sensitivity to a
 --method clad  M1, CLAD-Aug: probe trained on originals + composites (needs outputs/feats_<tag>/)
     b0, clad_<tag> for every --tags entry
+--method rich  M5, richer features (needs outputs/feats_rich/): b0 vs rich
+--method ens   M4, multi-backbone fusion ('combo'; b0 = SigLIP alone):
+    concat_dino_siglip, concat_all3, concat_rich_dino_siglip (if rich feats exist),
+    late_dino_siglip, late_all3 (average of per-backbone log-probabilities)
 
 Usage: python run_methods.py --out outputs --method tta --seeds 0 1 2 [--backbones ...]
 Output: outputs/results_methods/<method>/seed<k>/{probe_results.csv,predictions.csv.gz}
@@ -153,6 +157,67 @@ def run_one(method, name, seed, out, man, tags):
     return rows, pd.concat(preds, ignore_index=True)
 
 
+def _aligned(out, man, specs):
+    """Load several feature files ((dir, backbone) pairs) restricted to common kept rows."""
+    loaded = {s: load_kept(np.load(out / s[0] / f"{s[1]}.npz"), man) for s in specs}
+    common = sorted(set.intersection(*[set(r) for _, r in loaded.values()]))
+    out_x = {}
+    for s, (X, r) in loaded.items():
+        pos = {v: i for i, v in enumerate(r)}
+        out_x[s] = X[[pos[v] for v in common]]
+    return out_x, np.array(common)
+
+
+def run_feature_variants(method, name, seed, out, man):
+    """M4 'ens' (multi-backbone) and M5 'rich' (richer features): every variant = a probe on
+    concatenated feature blocks; 'late_*' variants average log-probabilities of other variants."""
+    t0 = time.time()
+    if method == "rich":
+        mats = {"b0": [("feats", name)], "rich": [("feats_rich", name)]}
+        late = {}
+    else:  # ens: name == "combo"; reference 'b0' = best single backbone (SigLIP)
+        mats = {"b0": [("feats", "siglip_b16")], "b0_dinov2_b": [("feats", "dinov2_b")],
+                "b0_resnet50": [("feats", "resnet50")],
+                "concat_dino_siglip": [("feats", "dinov2_b"), ("feats", "siglip_b16")],
+                "concat_all3": [("feats", "dinov2_b"), ("feats", "siglip_b16"), ("feats", "resnet50")]}
+        if all((out / "feats_rich" / f"{b}.npz").exists() for b in ["dinov2_b", "siglip_b16"]):
+            mats["concat_rich_dino_siglip"] = [("feats_rich", "dinov2_b"), ("feats_rich", "siglip_b16")]
+        late = {"late_dino_siglip": ["b0", "b0_dinov2_b"], "late_all3": ["b0", "b0_dinov2_b", "b0_resnet50"]}
+    specs = sorted({s for v in mats.values() for s in v})
+    feats, row_id = _aligned(out, man, specs)
+    m = man.loc[row_id]
+    ds, y = m.dataset.to_numpy(), m.label.map(CORE_TO_ID).to_numpy()
+    split = make_split(ds, y, seed=seed)
+    rows, preds = [], []
+    for proto, srcs in PROTOCOLS:
+        src = np.isin(ds, srcs)
+        tr, va = src & (split == "train"), src & (split == "val")
+        targets = DATASET_NAMES if proto == "single" else [d for d in DATASET_NAMES if d not in srcs]
+        probs = {}
+        for var, blocks in mats.items():
+            X = np.hstack([feats[b] for b in blocks])
+            sc, clf, _, _ = fit_probe(X[tr], y[tr], X[va], y[va], seed)
+            for tgt in targets:
+                te = (ds == tgt) & (split == "test")
+                probs[(var, tgt)] = clf.predict_proba(sc.transform(X[te]))
+        for var, members in late.items():
+            for tgt in targets:
+                lp = np.mean([np.log(probs[(mb, tgt)] + 1e-12) for mb in members], 0)
+                probs[(var, tgt)] = softmax(lp, 1)
+        for (var, tgt), prob in probs.items():
+            te = (ds == tgt) & (split == "test")
+            mt, pred = metrics(prob, y[te])
+            rows.append({"method": method, "variant": var, "backbone": name, "seed": seed,
+                         "protocol": proto, "train_on": "+".join(srcs), "test_on": tgt,
+                         "in_domain": int(tgt in srcs), **mt})
+            preds.append(pd.DataFrame({"variant": var, "backbone": name, "protocol": proto,
+                                       "train_on": "+".join(srcs), "test_on": tgt, "row_id": row_id[te],
+                                       "y_true": np.array(CORE)[y[te]], "y_pred": np.array(CORE)[pred],
+                                       "conf": prob.max(1).round(4)}))
+    print(f"[{method}] {name} seed{seed} done ({time.time() - t0:.0f}s)", flush=True)
+    return rows, pd.concat(preds, ignore_index=True)
+
+
 def summarize(df):
     out = []
     for (bb, var), g in df.groupby(["backbone", "variant"]):
@@ -182,7 +247,7 @@ def summarize(df):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="outputs")
-    ap.add_argument("--method", required=True, choices=["tta", "text", "clad"])
+    ap.add_argument("--method", required=True, choices=["tta", "text", "clad", "rich", "ens"])
     ap.add_argument("--seeds", nargs="+", type=int, default=[0])
     ap.add_argument("--backbones", nargs="+", default=None)
     ap.add_argument("--tags", nargs="+", default=["clad_c1", "clad_full"])
@@ -190,14 +255,19 @@ def main():
     args = ap.parse_args()
     out = Path(args.out)
     man = pd.read_csv(out / "manifest.csv")
-    default_bb = {"tta": ["resnet50", "dinov2_b", "siglip_b16"], "text": ["clip_b16", "siglip_b16"],
-                  "clad": ["resnet50", "dinov2_b", "siglip_b16"]}[args.method]
+    three = ["resnet50", "dinov2_b", "siglip_b16"]
+    default_bb = {"tta": three, "text": ["clip_b16", "siglip_b16"], "clad": three,
+                  "rich": three, "ens": ["combo"]}[args.method]
     names = args.backbones or default_bb
     res_root = out / "results_methods" / args.method
 
     jobs = [(n, s) for s in args.seeds for n in names]
-    results = Parallel(n_jobs=min(args.jobs, len(jobs)))(
-        delayed(run_one)(args.method, n, s, out, man, args.tags) for n, s in jobs)
+    if args.method in ("rich", "ens"):
+        results = Parallel(n_jobs=min(args.jobs, len(jobs)))(
+            delayed(run_feature_variants)(args.method, n, s, out, man) for n, s in jobs)
+    else:
+        results = Parallel(n_jobs=min(args.jobs, len(jobs)))(
+            delayed(run_one)(args.method, n, s, out, man, args.tags) for n, s in jobs)
     for s in args.seeds:
         d = res_root / f"seed{s}"; d.mkdir(parents=True, exist_ok=True)
         sel = [r for (n, ss), r in zip(jobs, results) if ss == s]

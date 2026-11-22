@@ -49,6 +49,16 @@ Manual alternative (data uploaded as a Kaggle Dataset):
 | M2 Text anchors | CLIP/SigLIP zero-shot head with recycling-definition prompts, log-linear ensemble with the linear probe | `extract_clip.py`, `prompts.py` |
 | M3 Test-time adaptation | label-free: target feature re-standardisation, T3A prototypes, T3A+probe ensemble | (features only) |
 
+Second batch (`notebooks/kaggle_more_methods_2xT4.ipynb`), aimed at raising in-domain accuracy too:
+
+| Method | Idea | Scripts |
+|---|---|---|
+| M4 Fusion | concat / late fusion of DINOv2-B, SigLIP-B/16, ResNet-50 | `run_methods.py --method ens` |
+| M5 Rich features | CLS of last 4 blocks + mean patch (DINOv2 recipe), multi-stage pooling, flip averaging | `extract_rich.py`, `run_methods.py --method rich` |
+| M6 LP-FT + WiSE | LP-initialised LoRA / layer4 fine-tuning, weight interpolation alpha=0.5 | `preresize.py`, `finetune.py` |
+
+`summarize.py` merges every method into `results_methods/leaderboard.csv`.
+
 All evaluated by `run_methods.py --method {clad,text,tta}` with the B0 protocol; near-duplicates
 (DINOv2 cosine >= 0.95) are removed first by `neardup.py`.
 
