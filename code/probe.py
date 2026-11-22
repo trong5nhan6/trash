@@ -7,6 +7,7 @@ The seed controls the train/val/test split. C is chosen on the *source* val spli
 
 Usage:  python probe.py --out outputs --seed 0 [--backbones resnet50 dinov2_b ...]
 Output: outputs/results/seed<k>/probe_results.csv   (one row per backbone x protocol x target)
+        outputs/results/seed<k>/predictions.csv.gz   (one row per test image per run)
         outputs/results/seed<k>/matrix_<metric>_<backbone>.csv  (4x4, rows=train, cols=test)
         outputs/results/seed<k>/table2a_summary.csv
 """
@@ -51,9 +52,10 @@ def fit_probe(Xtr, ytr, Xva, yva, seed):
 def evaluate(sc, clf, X, y):
     prob = clf.predict_proba(sc.transform(X))
     pred = prob.argmax(1)
-    return {"acc": accuracy_score(y, pred) * 100,
-            "macro_f1": f1_score(y, pred, average="macro", labels=range(len(CORE))) * 100,
-            "ece": ece_score(prob, y) * 100, "n_test": len(y)}
+    metrics = {"acc": accuracy_score(y, pred) * 100,
+               "macro_f1": f1_score(y, pred, average="macro", labels=range(len(CORE))) * 100,
+               "ece": ece_score(prob, y) * 100, "n_test": len(y)}
+    return metrics, pred, prob.max(1)
 
 
 def main():
@@ -71,17 +73,17 @@ def main():
 
     # One worker per backbone (CPU); each returns its result rows.
     from joblib import Parallel, delayed
-    per_bb = Parallel(n_jobs=min(args.jobs, len(names)), verbose=0)(
+    results = Parallel(n_jobs=min(args.jobs, len(names)), verbose=0)(
         delayed(run_backbone)(name, out, man, args.seed) for name in names)
-    rows = [r for rs in per_bb for r in rs]
-    finish(rows, names, res_dir, args.seed)
+    finish(results, names, res_dir, args.seed)
 
 
 def run_backbone(name, out, man, seed):
-    rows = []
+    rows, preds = [], []
     z = np.load(out / "feats" / f"{name}.npz")
     X = z["feats"].astype(np.float32)
-    m = man.loc[z["row_id"]]
+    row_id = z["row_id"]
+    m = man.loc[row_id]
     ds = m.dataset.to_numpy()
     y = m.label.map(CORE_TO_ID).to_numpy()
     split = make_split(ds, y, seed=seed)
@@ -99,16 +101,25 @@ def run_backbone(name, out, man, seed):
             r = {"backbone": name, "seed": seed, "protocol": proto,
                  "train_on": "+".join(srcs), "test_on": tgt,
                  "in_domain": int(tgt in srcs), "C": C, "val_f1": val_f1 * 100}
-            r.update(evaluate(sc, clf, X[te], y[te]))
+            metrics, pred, conf = evaluate(sc, clf, X[te], y[te])
+            r.update(metrics)
             rows.append(r)
+            preds.append(pd.DataFrame({
+                "backbone": name, "protocol": proto, "train_on": r["train_on"], "test_on": tgt,
+                "row_id": row_id[te], "y_true": np.array(CORE)[y[te]], "y_pred": np.array(CORE)[pred],
+                "conf": conf.round(4)}))
         print(f"[{name}] {proto:6s} train={'+'.join(srcs):35s} C={C:<6} "
               f"val_f1={val_f1*100:.1f}  ({time.time()-t0:.0f}s)", flush=True)
-    return rows
+    return rows, pd.concat(preds, ignore_index=True)
 
 
-def finish(rows, names, res_dir, seed):
+def finish(results, names, res_dir, seed):
+    rows = [r for rs, _ in results for r in rs]
     df = pd.DataFrame(rows)
     df.to_csv(res_dir / "probe_results.csv", index=False)
+    # per-image predictions (row_id -> manifest.csv) for confusion matrices / error analysis
+    pd.concat([p for _, p in results], ignore_index=True).to_csv(
+        res_dir / "predictions.csv.gz", index=False, compression="gzip")
 
     # 4x4 matrices (Fig. 2) per backbone
     single = df[df.protocol == "single"]
