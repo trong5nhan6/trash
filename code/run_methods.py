@@ -249,7 +249,7 @@ def main():
     ap.add_argument("--out", default="outputs")
     ap.add_argument("--method", required=True,
                     choices=["tta", "text", "clad", "rich", "ens", "erase", "prior", "subclass",
-                             "reweight", "cluster", "labelprop"])
+                             "reweight", "cluster", "labelprop", "gated"])
     ap.add_argument("--seeds", nargs="+", type=int, default=[0])
     ap.add_argument("--backbones", nargs="+", default=None)
     ap.add_argument("--tags", nargs="+", default=["clad_c1", "clad_full"])
@@ -260,12 +260,13 @@ def main():
     three = ["resnet50", "dinov2_b", "siglip_b16"]
     default_bb = {"tta": three, "text": ["clip_b16", "siglip_b16"], "clad": three,
                   "rich": three, "ens": ["combo"], "erase": three, "prior": three,
-                  "subclass": three, "reweight": three, "cluster": three, "labelprop": three}[args.method]
+                  "subclass": three, "reweight": three, "cluster": three, "labelprop": three,
+                  "gated": three}[args.method]
     names = args.backbones or default_bb
     res_root = out / "results_methods" / args.method
 
     jobs = [(n, s) for s in args.seeds for n in names]
-    if args.method in ("reweight", "cluster", "labelprop"):
+    if args.method in ("reweight", "cluster", "labelprop", "gated"):
         from methods_data import run_data_method_v2
         results = Parallel(n_jobs=min(args.jobs, len(jobs)))(
             delayed(run_data_method_v2)(args.method, n, s, out, man) for n, s in jobs)
