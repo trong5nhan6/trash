@@ -23,19 +23,25 @@ Mỗi bước đều resume được (bỏ qua phần đã xong).
 """)
 
 code("""
+import os
+IS_KAGGLE = os.path.isdir("/kaggle/working")
+WORK = "/kaggle/working" if IS_KAGGLE else "/content"      # Kaggle hoặc Colab
+SAVE_TO_DRIVE = not IS_KAGGLE                               # Colab: chép file zip kết quả vào Google Drive
 DRIVE_URL = "https://drive.google.com/file/d/1KN9lMekyM5TWDqN5lhT2xqKmGydbkRuW/view?usp=sharing"
 SEEDS     = [0, 1, 2]
 RUN       = {"tta": True, "text": True, "clad": True}   # tắt bớt nếu muốn chạy nhanh
 CLAD_K    = 3                                           # số ảnh ghép / ảnh gốc
 
-REPO_URL, REPO_DIR = "https://github.com/trong5nhan6/trash.git", "/kaggle/working/trash"
+REPO_URL, REPO_DIR = "https://github.com/trong5nhan6/trash.git", f"{WORK}/trash"
 DATA_DIR, ROOT     = "/tmp/data", "/tmp/root"
-OUT, CLAD_DIR      = "/kaggle/working/outputs", "/tmp/clad"
+OUT, CLAD_DIR      = f"{WORK}/outputs", "/tmp/clad"
 BACKBONES          = ["resnet50", "dinov2_b", "siglip_b16"]
 """)
 
 code("""
 import os, glob, shutil, subprocess, time, torch
+if SAVE_TO_DRIVE:                                  # Colab: mount Drive ngay từ đầu (cần bấm cho phép 1 lần)
+    from google.colab import drive; drive.mount("/content/drive")
 !nvidia-smi --query-gpu=index,name,memory.total --format=csv
 N_GPU, N_CPU = torch.cuda.device_count(), os.cpu_count()
 print("GPUs:", N_GPU, "| CPUs:", N_CPU)
@@ -162,9 +168,12 @@ code("""
 tag = "methods_seeds" + "-".join(map(str, SEEDS))
 tmp = "/tmp/results_only"; shutil.rmtree(tmp, ignore_errors=True)
 shutil.copytree(OUT, tmp, ignore=shutil.ignore_patterns("feats*", "emb", "fg"))
-shutil.make_archive(f"/kaggle/working/results_{tag}", "zip", tmp)
-shutil.make_archive(f"/kaggle/working/full_{tag}", "zip", OUT)
-!ls -lh /kaggle/working/*.zip
+shutil.make_archive(f"{WORK}/results_{tag}", "zip", tmp)
+shutil.make_archive(f"{WORK}/full_{tag}", "zip", OUT)
+!ls -lh {WORK}/*.zip
+if SAVE_TO_DRIVE:
+    dst = "/content/drive/MyDrive/taimma_results"; os.makedirs(dst, exist_ok=True)
+    for z in glob.glob(f"{WORK}/*.zip"): shutil.copy(z, dst); print("copied", os.path.basename(z), "->", dst)
 """)
 
 nb = {"cells": cells, "metadata": {

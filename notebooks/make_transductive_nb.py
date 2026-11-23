@@ -22,17 +22,23 @@ md("""
 """)
 
 code("""
+import os
+IS_KAGGLE = os.path.isdir("/kaggle/working")
+WORK = "/kaggle/working" if IS_KAGGLE else "/content"      # Kaggle hoặc Colab
+SAVE_TO_DRIVE = not IS_KAGGLE                               # Colab: chép file zip kết quả vào Google Drive
 DRIVE_URL = "https://drive.google.com/file/d/1KN9lMekyM5TWDqN5lhT2xqKmGydbkRuW/view?usp=sharing"
 SEEDS     = [0, 1, 2]
 METHODS   = ["labelprop", "cluster", "tta", "prior", "subclass", "erase", "reweight"]
 JOBS      = 3            # tiến trình CPU song song (giữ thấp để không hết RAM)
 
-REPO_URL, REPO_DIR = "https://github.com/trong5nhan6/trash.git", "/kaggle/working/trash"
-DATA_DIR, ROOT, OUT = "/tmp/data", "/tmp/root", "/kaggle/working/outputs"
+REPO_URL, REPO_DIR = "https://github.com/trong5nhan6/trash.git", f"{WORK}/trash"
+DATA_DIR, ROOT, OUT = "/tmp/data", "/tmp/root", f"{WORK}/outputs"
 """)
 
 code("""
 import os, glob, shutil, subprocess, time, torch
+if SAVE_TO_DRIVE:                                  # Colab: mount Drive ngay từ đầu (cần bấm cho phép 1 lần)
+    from google.colab import drive; drive.mount("/content/drive")
 N_GPU, N_CPU = torch.cuda.device_count(), os.cpu_count()
 print("GPUs:", N_GPU, "| CPUs:", N_CPU)
 if os.path.isdir(REPO_DIR): subprocess.run(["git", "-C", REPO_DIR, "pull", "-q"], check=True)
@@ -87,8 +93,11 @@ code("""
 code("""
 tmp = "/tmp/results_only"; shutil.rmtree(tmp, ignore_errors=True)
 shutil.copytree(OUT, tmp, ignore=shutil.ignore_patterns("feats*"))
-shutil.make_archive("/kaggle/working/results_transductive", "zip", tmp)
-!ls -lh /kaggle/working/*.zip
+shutil.make_archive(f"{WORK}/results_transductive", "zip", tmp)
+!ls -lh {WORK}/*.zip
+if SAVE_TO_DRIVE:
+    dst = "/content/drive/MyDrive/taimma_results"; os.makedirs(dst, exist_ok=True)
+    for z in glob.glob(f"{WORK}/*.zip"): shutil.copy(z, dst); print("copied", os.path.basename(z), "->", dst)
 """)
 
 nb = {"cells": cells, "metadata": {

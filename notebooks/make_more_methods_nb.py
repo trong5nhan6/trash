@@ -20,6 +20,10 @@ Mọi bước resume được. Notebook độc lập: tự tải data, trích fe
 """)
 
 code("""
+import os
+IS_KAGGLE = os.path.isdir("/kaggle/working")
+WORK = "/kaggle/working" if IS_KAGGLE else "/content"      # Kaggle hoặc Colab
+SAVE_TO_DRIVE = not IS_KAGGLE                               # Colab: chép file zip kết quả vào Google Drive
 DRIVE_URL = "https://drive.google.com/file/d/1KN9lMekyM5TWDqN5lhT2xqKmGydbkRuW/view?usp=sharing"
 SEEDS     = [0, 1, 2]          # M4, M5 (CPU, rẻ)
 FT_SEEDS  = [0, 1, 2]          # M6 fine-tune (GPU, ~45 phút / seed với 2 GPU)
@@ -27,13 +31,15 @@ FT_EPOCHS = 5
 FT_BACKBONES = ["siglip_b16", "dinov2_b", "resnet50"]   # chạy lại riêng một backbone: ["resnet50"]
 RUN       = {"ens": True, "rich": True, "lpft": True}
 
-REPO_URL, REPO_DIR = "https://github.com/trong5nhan6/trash.git", "/kaggle/working/trash"
+REPO_URL, REPO_DIR = "https://github.com/trong5nhan6/trash.git", f"{WORK}/trash"
 DATA_DIR, ROOT, SMALL = "/tmp/data", "/tmp/root", "/tmp/small"
-OUT = "/kaggle/working/outputs"
+OUT = f"{WORK}/outputs"
 """)
 
 code("""
 import os, glob, shutil, subprocess, time, torch
+if SAVE_TO_DRIVE:                                  # Colab: mount Drive ngay từ đầu (cần bấm cho phép 1 lần)
+    from google.colab import drive; drive.mount("/content/drive")
 !nvidia-smi --query-gpu=index,name,memory.total --format=csv
 N_GPU, N_CPU = torch.cuda.device_count(), os.cpu_count()
 print("GPUs:", N_GPU, "| CPUs:", N_CPU)
@@ -112,8 +118,8 @@ if RUN["lpft"]:
     !cd {REPO_DIR}/code && python preresize.py --root {ROOT} --out {OUT} --dst {SMALL}
     S = " ".join(map(str, FT_SEEDS))
     ft = lambda bb: f"finetune.py --root {SMALL} --out {OUT} --backbone {bb} --seeds {S} --epochs {FT_EPOCHS} --workers {W}"
-    chains = [[], []]
-    for i, bb in enumerate(FT_BACKBONES): chains[i % 2].append(ft(bb))
+    chains = [[], []] if N_GPU >= 2 else [[]]          # 1 GPU (Colab): fine-tune tuần tự
+    for i, bb in enumerate(FT_BACKBONES): chains[i % len(chains)].append(ft(bb))
     run_on_gpus(chains, "C_lpft")
 """)
 
@@ -135,9 +141,12 @@ code("""
 tag = "more_methods"
 tmp = "/tmp/results_only"; shutil.rmtree(tmp, ignore_errors=True)
 shutil.copytree(OUT, tmp, ignore=shutil.ignore_patterns("feats*", "emb", "fg"))
-shutil.make_archive(f"/kaggle/working/results_{tag}", "zip", tmp)
-shutil.make_archive(f"/kaggle/working/full_{tag}", "zip", OUT)
-!ls -lh /kaggle/working/*.zip
+shutil.make_archive(f"{WORK}/results_{tag}", "zip", tmp)
+shutil.make_archive(f"{WORK}/full_{tag}", "zip", OUT)
+!ls -lh {WORK}/*.zip
+if SAVE_TO_DRIVE:
+    dst = "/content/drive/MyDrive/taimma_results"; os.makedirs(dst, exist_ok=True)
+    for z in glob.glob(f"{WORK}/*.zip"): shutil.copy(z, dst); print("copied", os.path.basename(z), "->", dst)
 """)
 
 nb = {"cells": cells, "metadata": {
