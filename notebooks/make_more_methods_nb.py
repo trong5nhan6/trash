@@ -24,6 +24,7 @@ DRIVE_URL = "https://drive.google.com/file/d/1KN9lMekyM5TWDqN5lhT2xqKmGydbkRuW/v
 SEEDS     = [0, 1, 2]          # M4, M5 (CPU, rẻ)
 FT_SEEDS  = [0, 1, 2]          # M6 fine-tune (GPU, ~45 phút / seed với 2 GPU)
 FT_EPOCHS = 5
+FT_BACKBONES = ["siglip_b16", "dinov2_b", "resnet50"]   # chạy lại riêng một backbone: ["resnet50"]
 RUN       = {"ens": True, "rich": True, "lpft": True}
 
 REPO_URL, REPO_DIR = "https://github.com/trong5nhan6/trash.git", "/kaggle/working/trash"
@@ -78,7 +79,7 @@ def run_on_gpus(chains, stage):
     while any(p.poll() is None for *_, p in procs):
         time.sleep(60)
         for g, log, p in procs:
-            last = open(log).read().strip().splitlines()[-1:] if os.path.exists(log) else [""]
+            last = (open(log, errors="ignore").read().strip().splitlines()[-1:] if os.path.exists(log) else []) or [""]
             print(f"  {(time.time()-t0)/60:4.0f} min | chain{g}: {last[0][:150]}")
     for g, log, p in procs:
         if p.returncode != 0:
@@ -111,7 +112,9 @@ if RUN["lpft"]:
     !cd {REPO_DIR}/code && python preresize.py --root {ROOT} --out {OUT} --dst {SMALL}
     S = " ".join(map(str, FT_SEEDS))
     ft = lambda bb: f"finetune.py --root {SMALL} --out {OUT} --backbone {bb} --seeds {S} --epochs {FT_EPOCHS} --workers {W}"
-    run_on_gpus([[ft("siglip_b16"), ft("resnet50")], [ft("dinov2_b")]], "C_lpft")
+    chains = [[], []]
+    for i, bb in enumerate(FT_BACKBONES): chains[i % 2].append(ft(bb))
+    run_on_gpus(chains, "C_lpft")
 """)
 
 code("""

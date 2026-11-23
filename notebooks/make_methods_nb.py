@@ -84,7 +84,7 @@ def run_on_gpus(chains, stage):
     while any(p.poll() is None for *_, p in procs):
         time.sleep(60)
         for g, log, p in procs:
-            last = open(log).read().strip().splitlines()[-1:] if os.path.exists(log) else [""]
+            last = (open(log, errors="ignore").read().strip().splitlines()[-1:] if os.path.exists(log) else []) or [""]
             print(f"  {(time.time()-t0)/60:4.0f} min | chain{g}: {last[0][:150]}")
     for g, log, p in procs:
         if p.returncode != 0:
