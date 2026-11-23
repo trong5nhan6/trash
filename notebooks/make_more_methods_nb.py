@@ -15,7 +15,7 @@ md("""
 | M5 | Rich features | DINOv2-paper probe (CLS of last 4 blocks + mean patch), multi-stage pooling for ResNet, flip averaging | GPU → CPU |
 | M6 | LP-FT + WiSE | LP-initialised fine-tuning (LoRA for ViT, layer4 for ResNet) + weight interpolation α = 0.5 | GPU |
 
-*Settings*: **GPU T4 x2**, **Internet On** → *Run All*. Ước tính 3–4 giờ với 3 seed cho M6 (giảm `FT_SEEDS` để nhanh hơn).
+*Settings*: **GPU T4 x2**, **Internet On** → *Run All*. M6 chỉ chạy phần còn thiếu theo `FT_PLAN` (mặc định: dinov2_b seed 2 + resnet50 seed 0–2).
 Mọi bước resume được. Notebook độc lập: tự tải data, trích feature gốc, lọc ảnh gần trùng.
 """)
 
@@ -26,9 +26,11 @@ WORK = "/kaggle/working" if IS_KAGGLE else "/content"      # Kaggle hoặc Colab
 SAVE_TO_DRIVE = not IS_KAGGLE                               # Colab: chép file zip kết quả vào Google Drive
 DRIVE_URL = "https://drive.google.com/file/d/1KN9lMekyM5TWDqN5lhT2xqKmGydbkRuW/view?usp=sharing"
 SEEDS     = [0, 1, 2]          # M4, M5 (CPU, rẻ)
-FT_SEEDS  = [0, 1, 2]          # M6 fine-tune (GPU, ~45 phút / seed với 2 GPU)
 FT_EPOCHS = 5
-FT_BACKBONES = ["siglip_b16", "dinov2_b", "resnet50"]   # chạy lại riêng một backbone: ["resnet50"]
+# M6: backbone -> seeds cần fine-tune. Lần chạy trước (trash-method-1) đã xong siglip_b16 seed 0-2
+# và dinov2_b seed 0-1, nên mặc định chỉ chạy phần còn thiếu. Chạy đủ từ đầu:
+# FT_PLAN = {"siglip_b16": [0, 1, 2], "dinov2_b": [0, 1, 2], "resnet50": [0, 1, 2]}
+FT_PLAN   = {"dinov2_b": [2], "resnet50": [0, 1, 2]}
 RUN       = {"ens": True, "rich": True, "lpft": True}
 
 REPO_URL, REPO_DIR = "https://github.com/trong5nhan6/trash.git", f"{WORK}/trash"
@@ -85,8 +87,11 @@ def run_on_gpus(chains, stage):
     while any(p.poll() is None for *_, p in procs):
         time.sleep(60)
         for g, log, p in procs:
-            last = (open(log, errors="ignore").read().strip().splitlines()[-1:] if os.path.exists(log) else []) or [""]
-            print(f"  {(time.time()-t0)/60:4.0f} min | chain{g}: {last[0][:150]}")
+            try:   # progress display only: must never stop the run
+                last = (open(log, errors="ignore").read().strip().splitlines()[-1:] if os.path.exists(log) else []) or [""]
+                print(f"  {(time.time()-t0)/60:4.0f} min | chain{g}: {last[0][:150]}")
+            except Exception as e:
+                print(f"  (monitor: {e})")
     for g, log, p in procs:
         if p.returncode != 0:
             print(open(log).read()[-3000:]); raise RuntimeError(f"{stage} chain{g} failed")
@@ -116,10 +121,10 @@ code("""
 # C. M6 LP-FT + WiSE (GPU). Ảnh được thu nhỏ trước (cạnh ngắn 256) để không nghẽn CPU.
 if RUN["lpft"]:
     !cd {REPO_DIR}/code && python preresize.py --root {ROOT} --out {OUT} --dst {SMALL}
-    S = " ".join(map(str, FT_SEEDS))
-    ft = lambda bb: f"finetune.py --root {SMALL} --out {OUT} --backbone {bb} --seeds {S} --epochs {FT_EPOCHS} --workers {W}"
+    ft = lambda bb, seeds: (f"finetune.py --root {SMALL} --out {OUT} --backbone {bb} "
+                            f"--seeds {' '.join(map(str, seeds))} --epochs {FT_EPOCHS} --workers {W}")
     chains = [[], []] if N_GPU >= 2 else [[]]          # 1 GPU (Colab): fine-tune tuần tự
-    for i, bb in enumerate(FT_BACKBONES): chains[i % len(chains)].append(ft(bb))
+    for i, (bb, seeds) in enumerate(FT_PLAN.items()): chains[i % len(chains)].append(ft(bb, seeds))
     run_on_gpus(chains, "C_lpft")
 """)
 
