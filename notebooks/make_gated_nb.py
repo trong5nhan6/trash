@@ -32,6 +32,7 @@ IS_KAGGLE = os.path.isdir("/kaggle/working")
 WORK = "/kaggle/working" if IS_KAGGLE else "/content"      # Kaggle hoặc Colab
 SAVE_TO_DRIVE = not IS_KAGGLE                               # Colab: chép file zip kết quả vào Google Drive
 DRIVE_URL = "https://drive.google.com/file/d/1KN9lMekyM5TWDqN5lhT2xqKmGydbkRuW/view?usp=sharing"
+DRIVE_ZIP = "/content/drive/MyDrive/datasets.zip"   # Colab: đường dẫn file zip dữ liệu trong Drive của bạn
 SEEDS     = [0, 1, 2]
 # mọi backbone đã dùng trong baseline -> chứng minh phương pháp không phụ thuộc backbone
 BACKBONES = ["resnet50", "effnet_b0", "convnext_t", "dinov2_b", "dinov2_l", "clip_b16", "siglip_b16"]
@@ -55,15 +56,32 @@ else: subprocess.run(["git", "clone", "-q", REPO_URL, REPO_DIR], check=True)
 code("""
 # Dữ liệu + manifest
 os.makedirs(DATA_DIR, exist_ok=True)
-if not glob.glob(f"{DATA_DIR}/**/TrashBox_train_set", recursive=True):
+# Nguồn dữ liệu theo thứ tự: (1) Kaggle Dataset đã gắn vào notebook ("Add Input"),
+# (2) Colab: file zip trong Google Drive đã mount, (3) tải trực tiếp link Drive bằng wget (resume + thử lại).
+has = lambda base: bool(glob.glob(f"{base}/**/TrashBox_train_set", recursive=True))
+SEARCH = "/kaggle/input" if IS_KAGGLE and has("/kaggle/input") else DATA_DIR
+if SEARCH == DATA_DIR and not has(DATA_DIR):
     z = f"{DATA_DIR}/data.zip"
-    subprocess.run(["gdown", "--fuzzy", DRIVE_URL, "-O", z], check=True)
+    if SAVE_TO_DRIVE and os.path.exists(DRIVE_ZIP):
+        print("copy from mounted Drive:", DRIVE_ZIP); shutil.copy(DRIVE_ZIP, z)
+    else:
+        fid = DRIVE_URL.split("/d/")[1].split("/")[0]
+        url = f"https://drive.usercontent.google.com/download?id={fid}&export=download&confirm=t"
+        for attempt in range(5):
+            r = subprocess.run(["wget", "-q", "-c", "-O", z, url])
+            if r.returncode == 0 and os.path.getsize(z) > 1e9: break
+            if os.path.exists(z) and os.path.getsize(z) < 1e8: os.remove(z)   # HTML error page, not data
+            print(f"download attempt {attempt + 1} failed, retry in 60 s"); time.sleep(60)
+        assert os.path.exists(z) and os.path.getsize(z) > 1e9, (
+            "Không tải được dữ liệu từ Drive (Google giới hạn lượt tải). Cách chắc chắn: upload thư mục "
+            "datasets thành Kaggle Dataset rồi 'Add Input' vào notebook, hoặc trên Colab đặt DRIVE_ZIP.")
     subprocess.run(["unzip", "-q", "-o", z, "-d", DATA_DIR], check=True); os.remove(z)
+print("data source:", SEARCH)
 MARKERS = {"TrashNet": "dataset-resized", "RealWaste": "realwaste-main",
            "TrashBox": "TrashBox_train_set", "Garbage12": "garbage_classification"}
 os.makedirs(ROOT, exist_ok=True)
 for name, marker in MARKERS.items():
-    hits = [h for h in glob.glob(f"{DATA_DIR}/**/{marker}", recursive=True) if os.path.isdir(h)]
+    hits = [h for h in glob.glob(f"{SEARCH}/**/{marker}", recursive=True) if os.path.isdir(h)]
     assert hits, f"missing {marker}"
     link = f"{ROOT}/{name}"
     if os.path.islink(link): os.remove(link)
