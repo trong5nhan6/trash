@@ -250,42 +250,56 @@ def run_data_method_v2(method, name, seed, out, man):
             # CG-SHOT-LP: confidence-gated cluster propagation (backbone-agnostic, label-free on target).
             # Measured: confident source predictions are ~97-99% correct in-domain, while OOD errors
             # concentrate in low-confidence predictions -> adapt only where the source model is unsure.
-            from run_methods import t3a_logits
-            Zva = sc.transform(X[va]); lva = clf.decision_function(Zva); pva = softmax(lva, 1)
-            best = None
-            for k in (5, 10, 20):
-                for a in (0.3, 0.5, 0.7, 0.9):
-                    f1 = f1_score(y[va], label_prop(Zva, pva, k, a).argmax(1), average="macro")
-                    if best is None or f1 > best[0] + 1e-9: best = (f1, k, a)
-            _, k_s, a_s = best
-            T_lp = fit_temperature(np.log(label_prop(Zva, pva, k_s, a_s) + 1e-12), y[va])
-            T_sh = fit_temperature(shot_logits(Zva, lva), y[va])
-            W = clf.coef_
-            T_t3 = fit_temperature(t3a_logits(Zva, lva, W), y[va])
-            # gate threshold: smallest tau whose retained source-val predictions are >= 98% correct
-            conf_va, ok_va = pva.max(1), pva.argmax(1) == y[va]
-            tau = next((t for t in np.round(np.arange(0.50, 1.0, 0.01), 2)
-                        if (conf_va >= t).sum() >= 20 and ok_va[conf_va >= t].mean() >= TAU_ACC), 0.99)
-            ens = lambda p, q: softmax(0.5 * np.log(p + 1e-12) + 0.5 * np.log(q + 1e-12), 1)
-            for tgt, te in tests.items():
-                Z, lb = sc.transform(X[te]), base[tgt]; p0 = softmax(lb, 1)
-                p_sl = softmax(np.log(label_prop(Z, ens(p0, softmax(shot_logits(Z, lb) / T_sh, 1)), k_s, a_s)
-                                      + 1e-12) / T_lp, 1)
-                p_t3 = ens(p0, softmax(t3a_logits(Z, lb, W) / T_t3, 1))
-                conf = p0.max(1); keep = (conf >= tau)[:, None]
-                w = np.clip((1 - conf) / (1 - tau + 1e-9), 0, 1)[:, None]
-                rec("shot_lprop_auto", tgt, p_sl)
-                rec("t3a_ens", tgt, p_t3)
-                rec("cg_hard", tgt, np.where(keep, p0, p_sl))          # gate -> SHOT->LP
-                rec("cg_soft", tgt, (1 - w) * p0 + w * p_sl)           # soft gate
-                rec("cg_hard_t3a", tgt, np.where(keep, p0, p_t3))      # gate -> T3A-ens
+            out, tau, kept = cg_predict(sc, clf, X[va], y[va], {t: X[te] for t, te in tests.items()})
+            for tgt in tests:
+                for var in CG_VARIANTS:
+                    rec(var, tgt, out[var][tgt])
                 rows[-1]["tau"] = tau
-                rows[-1]["kept_frac"] = float(keep.mean())
+                rows[-1]["kept_frac"] = kept[tgt]
     print(f"[{method}] {name} seed{seed} done ({time.time() - t0:.0f}s)", flush=True)
     return rows, pd.concat(preds, ignore_index=True)
 
 
 TAU_ACC = 0.98   # fixed a priori
+CG_VARIANTS = ["shot_lprop_auto", "t3a_ens", "cg_hard", "cg_soft", "cg_hard_t3a"]
+
+
+def cg_predict(sc, clf, Xva, yva, Xtests):
+    """CG-SHOT-LP on any feature space. sc/clf: source scaler + logistic regression; Xva/yva: labelled
+    source validation features (all hyper-parameters chosen there); Xtests: {target: unlabelled features}.
+    Returns ({variant: {target: probs}}, tau, {target: fraction kept by the hard gate})."""
+    from run_methods import t3a_logits, fit_temperature
+    Zva = sc.transform(Xva); lva = clf.decision_function(Zva); pva = softmax(lva, 1)
+    best = None
+    for k in (5, 10, 20):
+        for a in (0.3, 0.5, 0.7, 0.9):
+            f1 = f1_score(yva, label_prop(Zva, pva, k, a).argmax(1), average="macro")
+            if best is None or f1 > best[0] + 1e-9: best = (f1, k, a)
+    _, k_s, a_s = best
+    T_lp = fit_temperature(np.log(label_prop(Zva, pva, k_s, a_s) + 1e-12), yva)
+    T_sh = fit_temperature(shot_logits(Zva, lva), yva)
+    W = clf.coef_
+    T_t3 = fit_temperature(t3a_logits(Zva, lva, W), yva)
+    # gate threshold: smallest tau whose retained source-val predictions are >= TAU_ACC correct
+    conf_va, ok_va = pva.max(1), pva.argmax(1) == yva
+    tau = next((t for t in np.round(np.arange(0.50, 1.0, 0.01), 2)
+                if (conf_va >= t).sum() >= 20 and ok_va[conf_va >= t].mean() >= TAU_ACC), 0.99)
+    ens = lambda p, q: softmax(0.5 * np.log(p + 1e-12) + 0.5 * np.log(q + 1e-12), 1)
+    out, kept = {v: {} for v in CG_VARIANTS}, {}
+    for tgt, Xt in Xtests.items():
+        Z = sc.transform(Xt); lb = clf.decision_function(Z); p0 = softmax(lb, 1)
+        p_sl = softmax(np.log(label_prop(Z, ens(p0, softmax(shot_logits(Z, lb) / T_sh, 1)), k_s, a_s)
+                              + 1e-12) / T_lp, 1)
+        p_t3 = ens(p0, softmax(t3a_logits(Z, lb, W) / T_t3, 1))
+        conf = p0.max(1); keep = (conf >= tau)[:, None]
+        w = np.clip((1 - conf) / (1 - tau + 1e-9), 0, 1)[:, None]
+        out["shot_lprop_auto"][tgt] = p_sl
+        out["t3a_ens"][tgt] = p_t3
+        out["cg_hard"][tgt] = np.where(keep, p0, p_sl)          # gate -> SHOT->LP
+        out["cg_soft"][tgt] = (1 - w) * p0 + w * p_sl           # soft gate
+        out["cg_hard_t3a"][tgt] = np.where(keep, p0, p_t3)      # gate -> T3A-ens
+        kept[tgt] = float(keep.mean())
+    return out, tau, kept
 
 
 def shot_logits(Z, logits, iters=2):

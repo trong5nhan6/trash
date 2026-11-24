@@ -18,25 +18,27 @@ COLS = ["backbone", "variant", "n_seeds", "in_domain_F1", "ood_F1", "gap", "Tras
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="outputs")
-    ap.add_argument("--methods", nargs="+", default=["tta", "text", "clad", "rich", "ens", "lpft"])
+    ap.add_argument("--methods", nargs="+",
+                    default=["tta", "text", "clad", "rich", "ens", "lpft", "gated", "lpftcg"])
     args = ap.parse_args()
     root = Path(args.out) / "results_methods"
     board = []
     for meth in args.methods:
         d = root / meth
-        if meth == "lpft":
+        has_parts = (d / "parts").is_dir()      # finetune.py writes one file per (backbone, seed, protocol)
+        if has_parts:
             files = [f for f in (d / "parts").glob("*.csv") if not f.name.endswith("_pred.csv.gz")]
         else:
             files = list(d.glob("seed*/probe_results.csv"))
         if not files:
             continue
         df = pd.concat([pd.read_csv(f) for f in files])
-        if meth == "lpft":   # only keep (backbone, seed) with all 8 protocols finished
+        if has_parts:   # only keep (backbone, seed) with all 8 protocols finished
             done = df.groupby(["backbone", "seed"]).train_on.nunique()
             ok = done[done == 8].index
             df = df.set_index(["backbone", "seed"]).loc[ok].reset_index() if len(ok) else df.iloc[0:0]
             if df.empty:
-                print("lpft: no complete (backbone, seed) yet"); continue
+                print(f"{meth}: no complete (backbone, seed) yet"); continue
         s = summarize(df); s.insert(0, "method", meth)
         s.to_csv(d / "summary.csv", index=False)
         board.append(s)
