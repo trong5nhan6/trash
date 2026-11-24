@@ -80,10 +80,42 @@ def tradeoff(A, O):
     fig.savefig(O / "fig_tradeoff.pdf"); fig.savefig(O / "fig_tradeoff.png", dpi=200)
 
 
+def xai_maps(A, O, root, n_each=3):
+    """Occlusion-sensitivity examples (TrashNet -> RealWaste), SigLIP and DINOv2-B: correct and wrong."""
+    import json
+    from PIL import Image
+    man = pd.read_csv(A / "manifest.csv")
+    occ = pd.read_csv(A / "xai" / "occlusion.csv")
+    heat = LinearSegmentedColormap.from_list("h", ["#ffffff00", "#eb683480", "#eb6834ee"])   # one hue (orange)
+    rows = [("siglip_b16", "SigLIP"), ("dinov2_b", "DINOv2-B")]
+    fig, axes = plt.subplots(len(rows), 2 * n_each, figsize=(4.8, 1.9), constrained_layout=True)
+    for r, (bb, name) in enumerate(rows):
+        maps = json.load(open(A / "xai" / f"occlusion_maps_{bb}.json"))
+        d = occ[occ.backbone == bb]
+        pick = pd.concat([d[d.correct == 1].sort_values("conf", ascending=False).head(n_each),
+                          d[d.correct == 0].sort_values("conf", ascending=False).head(n_each)])
+        for c, (_, e) in enumerate(pick.iterrows()):
+            ax = axes[r, c]
+            im = Image.open(Path(root) / man.loc[e.row_id, "path"]).convert("RGB")
+            s = 224 / min(im.size); im = im.resize((round(im.size[0] * s), round(im.size[1] * s)))
+            L, T = (im.size[0] - 224) // 2, (im.size[1] - 224) // 2; im = im.crop((L, T, L + 224, T + 224))
+            m = np.array(maps[str(e.row_id)]); m = m / max(m.max(), 1e-9)
+            ax.imshow(im.convert("L"), cmap="gray", vmin=0, vmax=255)
+            ax.imshow(np.kron(m, np.ones((224 // m.shape[0] + 1,) * 2))[:224, :224], cmap=heat, vmin=0, vmax=1)
+            ax.set_xticks([]); ax.set_yticks([])
+            for s_ in ax.spines.values(): s_.set_edgecolor("#1baf7a" if e.correct else "#e34948"); s_.set_linewidth(1.6)
+            ax.set_title(f"{e.true}→{e.pred}", fontsize=5.6, color=INK2, pad=1.5)
+            if c == 0: ax.set_ylabel(name, fontsize=6.5, color=INK)
+    fig.savefig(O / "fig_xai.pdf", dpi=300); fig.savefig(O / "fig_xai.png", dpi=200)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--analysis", default="../paperwrite/analysis")
     ap.add_argument("--out", default="../paperwrite/paper/figures")
+    ap.add_argument("--root", default="../datasets")
     a = ap.parse_args()
     A, O = Path(a.analysis), Path(a.out); O.mkdir(parents=True, exist_ok=True)
-    heatmaps(A, O); tradeoff(A, O); print("figures ->", O)
+    heatmaps(A, O); tradeoff(A, O)
+    if (A / "xai" / "occlusion.csv").exists(): xai_maps(A, O, a.root)
+    print("figures ->", O)
