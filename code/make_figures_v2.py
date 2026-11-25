@@ -79,23 +79,32 @@ def pipeline(A, O, root):
     arrow(ax, (9.0, 4.7), (9.65, 4.7))
     arrow(ax, (12.25, 4.7), (12.9, 4.7), dashed=True)
     # test lane
-    box(ax, 2.55, 0.55, 5.6, 1.95, "Features, $p_0$", teal_fc, teal_ec)
-    box(ax, 6.3, 0.55, 9.85, 1.95, "Cluster propagation", teal_fc, teal_ec)
-    box(ax, 10.55, 0.55, 13.45, 1.95, "Confidence gate", "#FFF3B0", "#B8920A")
+    box(ax, 2.55, 0.55, 5.35, 1.95, "Features, $p_0$", teal_fc, teal_ec)
+    box(ax, 6.15, 0.55, 9.7, 1.95, "Cluster propagation", teal_fc, teal_ec)
+    box(ax, 10.6, 0.55, 13.3, 1.95, "Confidence gate", "#FFF3B0", "#B8920A")
     ax.text(14.95, 1.25, "Prediction", ha="center", va="center", fontsize=15, fontweight="bold")
     arrow(ax, (2.0, 1.25), (2.55, 1.25))
-    arrow(ax, (5.6, 1.25), (6.3, 1.25), label="$z$, $p_0$", loff=(0, 0.25))
-    arrow(ax, (9.85, 1.25), (10.55, 1.25), label="$p_{\\mathrm{adapt}}$", loff=(0, 0.27))
-    arrow(ax, (13.45, 1.25), (14.05, 1.25))
+    arrow(ax, (5.35, 1.25), (6.15, 1.25), label="$z$, $p_0$", loff=(0, 0.25))
+    arrow(ax, (9.7, 1.25), (10.6, 1.25), label="$p_{\\mathrm{adapt}}$", loff=(0, 0.27))
+    arrow(ax, (13.3, 1.25), (14.05, 1.25))
     # bypass of p0 and c to the gate, below the propagation box
-    ax.plot([4.1, 4.1, 12.0], [0.55, 0.3, 0.3], color="#444444", lw=2.0, zorder=1)
-    arrow(ax, (12.0, 0.3), (12.0, 0.55))
-    ax.text(8.1, 0.14, "$p_0$, $c$", ha="center", va="center", fontsize=12, color="#333333")
-    # one cross-lane link: the fine-tuned backbone and its probe are applied to the target images
-    arrow(ax, (10.3, 4.05), (5.2, 1.95), label="backbone + $f$", lpos=0.42, loff=(0.0, 0.0))
+    ax.plot([3.95, 3.95, 11.9], [0.55, 0.3, 0.3], color="#444444", lw=2.0, zorder=1)
+    arrow(ax, (11.9, 0.3), (11.9, 0.55))
+    ax.text(7.9, 0.14, "$p_0$, $c$", ha="center", va="center", fontsize=12, color="#333333")
+
+    # cross-lane links drawn as right-angle (orthogonal) connectors
+    def elbow(pts, dashed=False, label=None, lxy=None):
+        ls = "--" if dashed else "-"
+        ax.plot([p[0] for p in pts[:-1]], [p[1] for p in pts[:-1]], color="#444444", lw=2.0, ls=ls, zorder=1)
+        arrow(ax, pts[-2], pts[-1], dashed=dashed)
+        if label:
+            ax.text(*lxy, label, ha="center", va="center", fontsize=12.5, color="#333333", zorder=4,
+                    bbox=dict(fc="white", ec="none", pad=0.5))
+    # the fine-tuned backbone and its probe are applied to the target images
+    elbow([(10.95, 4.05), (10.95, 3.4), (4.9, 3.4), (4.9, 1.95)], label="backbone + $f$", lxy=(7.9, 3.4))
     # hyper-parameters chosen on source validation
-    arrow(ax, (14.6, 4.05), (12.9, 1.95), dashed=True, label="$\\tau$", lpos=0.45, loff=(0.22, 0))
-    arrow(ax, (13.4, 4.05), (9.6, 1.95), dashed=True, label="$k$, $\\alpha$", lpos=0.22, loff=(0.05, 0.13))
+    elbow([(13.3, 4.05), (13.3, 2.6), (7.9, 2.6), (7.9, 1.95)], dashed=True, label="$k$, $\\alpha$", lxy=(10.6, 2.6))
+    elbow([(14.6, 4.05), (14.6, 2.3), (12.5, 2.3), (12.5, 1.95)], dashed=True, label="$\\tau$", lxy=(14.6, 3.05))
     finalize_figure(fig, O / "fig_pipeline")
 
 
