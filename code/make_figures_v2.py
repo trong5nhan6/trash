@@ -113,10 +113,13 @@ def heatmaps(A, O):
     apply_publication_style(FigureStyle(font_size=16, axes_linewidth=0))
     fig, axes = plt.subplots(1, 2, figsize=(14, 6.0), constrained_layout=True)
     order = ["TrashNet", "RealWaste", "TrashBox", "Garbage12"]
+    # wider lightness range: light up to ~70, dark only near 100, so the 67-99 SigLIP cells stay distinguishable
+    cmap = LinearSegmentedColormap.from_list("blues_wide", [(0.0, "#FFFFFF"), (0.25, "#E4EEF8"), (0.5, "#B9D1EC"),
+                                                            (0.75, "#6E9DD3"), (1.0, P["blue_main"])])
     for ax, (bb, title) in zip(axes, [("resnet50", "ResNet-50"), ("siglip_b16", "SigLIP ViT-B/16")]):
         M = pd.read_csv(A / f"matrix_b0_{bb}.csv", index_col=0).loc[order, order].to_numpy()
         im = make_heatmap(ax, M, x_labels=order, y_labels=order if ax is axes[0] else [""] * 4,
-                          annotate=True, vmin=40, vmax=100, bold_diag=True)
+                          annotate=True, vmin=40, vmax=100, bold_diag=True, cmap=cmap, dark_from=0.78)
         ax.set_title(title, fontweight="bold"); ax.set_xlabel("test dataset")
         plt.setp(ax.get_xticklabels(), rotation=25, ha="right")
         if ax is axes[0]: ax.set_ylabel("training dataset")

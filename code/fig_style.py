@@ -56,7 +56,7 @@ def make_grouped_bar(ax, categories, series, labels, ylabel="Value", colors=None
 
 
 def make_heatmap(ax, matrix, x_labels=None, y_labels=None, cmap=None, cbar_label=None, annotate=False,
-                 vmin=None, vmax=None, fmt="{:.1f}", bold_diag=False):
+                 vmin=None, vmax=None, fmt="{:.1f}", bold_diag=False, dark_from=0.55):
     cmap = cmap or LinearSegmentedColormap.from_list("blues", ["#FFFFFF", PALETTE["blue_secondary"], PALETTE["blue_main"]])
     m = np.asarray(matrix, float)
     im = ax.imshow(m, cmap=cmap, vmin=vmin, vmax=vmax)
@@ -66,7 +66,7 @@ def make_heatmap(ax, matrix, x_labels=None, y_labels=None, cmap=None, cbar_label
         lo, hi = (vmin if vmin is not None else m.min()), (vmax if vmax is not None else m.max())
         for i in range(m.shape[0]):
             for j in range(m.shape[1]):
-                dark = (m[i, j] - lo) / max(hi - lo, 1e-9) > 0.55
+                dark = (m[i, j] - lo) / max(hi - lo, 1e-9) > dark_from
                 ax.text(j, i, fmt.format(m[i, j]), ha="center", va="center", color="white" if dark else "black",
                         fontweight="bold" if bold_diag and i == j else "normal",
                         fontsize=plt.rcParams["font.size"] - 3)
