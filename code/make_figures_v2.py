@@ -70,18 +70,18 @@ def pipeline(A, O, root):
     blue_fc, blue_ec = "#D6E4F4", P["blue_main"]
     teal_fc, teal_ec = "#D9ECEE", P["teal"]
     # training lane
-    box(ax, 2.55, 4.05, 5.15, 5.35, "Linear probe\nfrozen backbone", blue_fc, blue_ec)
-    box(ax, 5.8, 4.05, 9.0, 5.35, "LP-FT\nLoRA (ViT) or\nlast stage (CNN)", blue_fc, blue_ec)
-    box(ax, 9.65, 4.05, 12.25, 5.35, "Source probe $f$\non fine-tuned features", blue_fc, blue_ec)
-    box(ax, 12.9, 4.05, 15.75, 5.35, "Source validation\n$\\tau$, $k$, $\\alpha$, temperatures", "#ECECEC", "#7A7A7A")
+    box(ax, 2.55, 4.05, 5.15, 5.35, "Linear probe", blue_fc, blue_ec)
+    box(ax, 5.8, 4.05, 9.0, 5.35, "LP-FT", blue_fc, blue_ec)
+    box(ax, 9.65, 4.05, 12.25, 5.35, "New probe $f$", blue_fc, blue_ec)
+    box(ax, 12.9, 4.05, 15.75, 5.35, "Source validation", "#ECECEC", "#7A7A7A")
     arrow(ax, (2.0, 4.7), (2.55, 4.7))
     arrow(ax, (5.15, 4.7), (5.8, 4.7), label="init", loff=(0, 0.25))
     arrow(ax, (9.0, 4.7), (9.65, 4.7))
     arrow(ax, (12.25, 4.7), (12.9, 4.7), dashed=True)
     # test lane
-    box(ax, 2.55, 0.55, 5.6, 1.95, "Features and $p_0$\nfine-tuned backbone + $f$,\nconfidence $c$", teal_fc, teal_ec)
-    box(ax, 6.3, 0.55, 9.85, 1.95, "Cluster propagation\nclass centroids (SHOT)\n$\\rightarrow$ $k$-NN label propagation", teal_fc, teal_ec)
-    box(ax, 10.55, 0.55, 13.45, 1.95, "Confidence gate\n$p_0$ if $c \\geq \\tau$, else $p_{\\mathrm{adapt}}$", "#FFF3B0", "#B8920A")
+    box(ax, 2.55, 0.55, 5.6, 1.95, "Features, $p_0$", teal_fc, teal_ec)
+    box(ax, 6.3, 0.55, 9.85, 1.95, "Cluster propagation", teal_fc, teal_ec)
+    box(ax, 10.55, 0.55, 13.45, 1.95, "Confidence gate", "#FFF3B0", "#B8920A")
     ax.text(14.95, 1.25, "Prediction", ha="center", va="center", fontsize=15, fontweight="bold")
     arrow(ax, (2.0, 1.25), (2.55, 1.25))
     arrow(ax, (5.6, 1.25), (6.3, 1.25), label="$z$, $p_0$", loff=(0, 0.25))
@@ -90,9 +90,9 @@ def pipeline(A, O, root):
     # bypass of p0 and c to the gate, below the propagation box
     ax.plot([4.1, 4.1, 12.0], [0.55, 0.3, 0.3], color="#444444", lw=2.0, zorder=1)
     arrow(ax, (12.0, 0.3), (12.0, 0.55))
-    ax.text(8.1, 0.14, "$p_0$, $c$ (kept when confident)", ha="center", va="center", fontsize=12, color="#333333")
+    ax.text(8.1, 0.14, "$p_0$, $c$", ha="center", va="center", fontsize=12, color="#333333")
     # one cross-lane link: the fine-tuned backbone and its probe are applied to the target images
-    arrow(ax, (10.3, 4.05), (5.2, 1.95), label="fine-tuned backbone + $f$", lpos=0.42, loff=(0.0, 0.0))
+    arrow(ax, (10.3, 4.05), (5.2, 1.95), label="backbone + $f$", lpos=0.42, loff=(0.0, 0.0))
     # hyper-parameters chosen on source validation
     arrow(ax, (14.6, 4.05), (12.9, 1.95), dashed=True, label="$\\tau$", lpos=0.45, loff=(0.22, 0))
     arrow(ax, (13.4, 4.05), (9.6, 1.95), dashed=True, label="$k$, $\\alpha$", lpos=0.22, loff=(0.05, 0.13))
